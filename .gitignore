@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+
+# Jupyter and IDEs
+.ipynb_checkpoints/
+.vscode/
+.idea/
+
+# Data and Models
+coco2014/
+checkpoints/
+*.json
+*.jsonl
+*.pth
+*.pt
+*.bin
+output/
+POPE/output/
+
+# OS
+.DS_Store
+Thumbs.db
