@@ -206,6 +206,7 @@ class LLaVADataset(Dataset):
     def __len__(self):
         return len(self.data)
     
+    # ...existing code...
     def __getitem__(self, idx):
         item = self.data[idx]
         
@@ -213,75 +214,56 @@ class LLaVADataset(Dataset):
         image_path = item['image']
         try:
             image = Image.open(image_path).convert('RGB')
-            # return_tensors="pt" gives [1, 3, 224, 224], take [0]
             pixel_values = self.vision_processor(images=image, return_tensors="pt")['pixel_values'][0]
         except Exception as e:
             logger.error(f"Error loading image {image_path}: {e}")
             pixel_values = torch.zeros(3, 224, 224) # Dummy
         
-        # Format conversation
         conversations = item['conversations']
-        conversation_text = ""
+
+        # Build tokens + labels per turn (robust masking)
+        input_ids_list = []
+        labels_list = []
+
+        user_prefix_ids = self.tokenizer("USER:", add_special_tokens=False).input_ids
+        assistant_prefix_ids = self.tokenizer("ASSISTANT:", add_special_tokens=False).input_ids
+
         for conv in conversations:
             if conv['from'] == 'human':
-                text = conv['value'].replace('<image>', '<image>')
-                conversation_text += f"USER: {text}\n"
+                text = f"USER: {conv['value']}\n"
+                ids = self.tokenizer(text, add_special_tokens=False).input_ids
+                input_ids_list.extend(ids)
+                labels_list.extend([-100] * len(ids))
             else:
-                conversation_text += f"ASSISTANT: {conv['value']}\n"
-        
-        full_text = conversation_text
-        
-        encoded = self.tokenizer(
-            full_text,
-            max_length=self.max_length,
-            truncation=True,
-            padding='max_length',
-            return_tensors='pt'
-        )
-        
-        input_ids = encoded['input_ids'][0]
-        attention_mask = encoded['attention_mask'][0]
-        
-        labels = input_ids.clone()
-        
-        # Mask user parts
-        labels_list = labels.tolist()
-        
-        # Mask all initially
-        for i in range(len(labels_list)):
-            labels_list[i] = -100
-            
-        assistant_token = self.tokenizer.encode("ASSISTANT:", add_special_tokens=False)
-        user_token = self.tokenizer.encode("USER:", add_special_tokens=False)
-        
-        text_ids = input_ids.tolist()
-        i = 0
-        while i < len(text_ids):
-            if i + len(assistant_token) <= len(text_ids):
-                if text_ids[i:i+len(assistant_token)] == assistant_token:
-                    j = i + len(assistant_token)
-                    while j < len(text_ids):
-                        if j + len(user_token) <= len(text_ids):
-                            if text_ids[j:j+len(user_token)] == user_token:
-                                break
-                        if text_ids[j] == self.tokenizer.pad_token_id:
-                            break
-                        labels_list[j] = text_ids[j]
-                        j += 1
-                    i = j
-                else:
-                    i += 1
-            else:
-                i += 1
-                
-        labels = torch.tensor(labels_list)
+                text = f"ASSISTANT: {conv['value']}\n"
+                ids = self.tokenizer(text, add_special_tokens=False).input_ids
+                input_ids_list.extend(ids)
+                # mask prefix "ASSISTANT:" only
+                prefix_len = len(assistant_prefix_ids)
+                labels_list.extend([-100] * prefix_len)
+                labels_list.extend(ids[prefix_len:])
+
+        # Truncate
+        if len(input_ids_list) > self.max_length:
+            input_ids_list = input_ids_list[:self.max_length]
+            labels_list = labels_list[:self.max_length]
+
+        # Pad
+        pad_len = self.max_length - len(input_ids_list)
+        if pad_len > 0:
+            input_ids_list.extend([self.tokenizer.pad_token_id] * pad_len)
+            labels_list.extend([-100] * pad_len)
+
+        input_ids = torch.tensor(input_ids_list, dtype=torch.long)
+        attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
+        labels = torch.tensor(labels_list, dtype=torch.long)
         
         return {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
             'pixel_values': pixel_values,
             'labels': labels
-        }
+        } 
 
 def train_epoch(model, dataloader, optimizer, scheduler, epoch, grad_accum_steps, device, save_steps, output_dir):
     model.train()
