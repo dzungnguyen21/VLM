@@ -321,17 +321,17 @@ def train_epoch(model, dataloader, optimizer, scheduler, epoch, grad_accum_steps
             'lr': scheduler.get_last_lr()[0]
         })
         
-        if (step + 1) % save_steps == 0:
-            checkpoint_path = os.path.join(output_dir, f"checkpoint_epoch{epoch+1}_step{step+1}.pt")
-            torch.save({
-                'epoch': epoch,
-                'step': step,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'loss': total_loss / (step + 1),
-            }, checkpoint_path)
-            logger.info(f"Checkpoint saved to {checkpoint_path}")
+        # if (step + 1) % save_steps == 0:
+        #     checkpoint_path = os.path.join(output_dir, f"checkpoint_epoch{epoch+1}_step{step+1}.pt")
+        #     torch.save({
+        #         'epoch': epoch,
+        #         'step': step,
+        #         'model_state_dict': model.state_dict(),
+        #         'optimizer_state_dict': optimizer.state_dict(),
+        #         'scheduler_state_dict': scheduler.state_dict(),
+        #         'loss': total_loss / (step + 1),
+        #     }, checkpoint_path)
+        #     logger.info(f"Checkpoint saved to {checkpoint_path}")
             
     return total_loss / len(dataloader)
 
@@ -410,6 +410,9 @@ def main():
     )
     
     logger.info("Starting training...")
+    best_loss = float('inf')
+    best_path = os.path.join(args.output_dir, "best_model.pt")
+
     for epoch in range(args.epochs):
         avg_loss = train_epoch(
             model,
@@ -423,9 +426,12 @@ def main():
             args.output_dir
         )
         logger.info(f"Epoch {epoch+1} Average Loss: {avg_loss:.4f}")
-        
+    
         # Save epoch checkpoint
-        torch.save(model.state_dict(), os.path.join(args.output_dir, f"model_epoch_{epoch+1}.pt"))
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+            torch.save(model.state_dict(), best_path)
+            logger.info(f"New best model saved to {best_path} (loss: {best_loss:.4f})")
 
 if __name__ == "__main__":
     main()
